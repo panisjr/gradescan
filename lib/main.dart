@@ -1,9 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:camera/camera.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'dart:math' as math;
 
-void main() {
+// Global camera list
+List<CameraDescription> cameras = [];
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize cameras
+  try {
+    cameras = await availableCameras();
+  } on CameraException catch (e) {
+    debugPrint('Error initializing cameras: ${e.description}');
+  }
+
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   runApp(const GradeScanApp());
 }
@@ -66,6 +79,7 @@ class ScanResult {
   final List<String> correctAnswers;
   final DateTime scannedAt;
   final String answerKeyName;
+  final String? imagePath;
 
   ScanResult({
     required this.id,
@@ -76,6 +90,7 @@ class ScanResult {
     required this.correctAnswers,
     required this.scannedAt,
     required this.answerKeyName,
+    this.imagePath,
   });
 
   double get percentage => (score / totalItems) * 100;
@@ -1333,7 +1348,6 @@ class _CreateAnswerKeyScreenState extends State<CreateAnswerKeyScreen> {
                           setState(() {
                             if (_currentItem < _answers.length) {
                               _answers[_currentItem] = option;
-                              // Auto-advance to next item
                               if (_currentItem < _answers.length - 1) {
                                 _currentItem++;
                               }
@@ -1772,7 +1786,7 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 }
 
-// ==================== ACTIVE SCAN SCREEN ====================
+// ==================== ACTIVE SCAN SCREEN WITH REAL CAMERA ====================
 
 class ActiveScanScreen extends StatefulWidget {
   final AnswerKey answerKey;
@@ -1784,23 +1798,119 @@ class ActiveScanScreen extends StatefulWidget {
 }
 
 class _ActiveScanScreenState extends State<ActiveScanScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  CameraController? _cameraController;
   late AnimationController _animationController;
   bool _isScanning = false;
+  bool _isCameraInitialized = false;
+  bool _isFlashOn = false;
   int _scannedCount = 0;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat();
+    _initializeCamera();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final CameraController? cameraController = _cameraController;
+
+    if (cameraController == null || !cameraController.value.isInitialized) {
+      return;
+    }
+
+    if (state == AppLifecycleState.inactive) {
+      cameraController.dispose();
+    } else if (state == AppLifecycleState.resumed) {
+      _initializeCamera();
+    }
+  }
+
+  Future<void> _initializeCamera() async {
+    // Request camera permission
+    final status = await Permission.camera.request();
+
+    if (status.isDenied) {
+      setState(() {
+        _errorMessage = 'Camera permission denied';
+      });
+      return;
+    }
+
+    if (status.isPermanentlyDenied) {
+      setState(() {
+        _errorMessage =
+            'Camera permission permanently denied. Please enable it in settings.';
+      });
+      return;
+    }
+
+    if (cameras.isEmpty) {
+      setState(() {
+        _errorMessage = 'No cameras available';
+      });
+      return;
+    }
+
+    // Select the back camera
+    final CameraDescription camera = cameras.firstWhere(
+      (camera) => camera.lensDirection == CameraLensDirection.back,
+      orElse: () => cameras.first,
+    );
+
+    _cameraController = CameraController(
+      camera,
+      ResolutionPreset.high,
+      enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.jpeg,
+    );
+
+    try {
+      await _cameraController!.initialize();
+      if (mounted) {
+        setState(() {
+          _isCameraInitialized = true;
+          _errorMessage = null;
+        });
+      }
+    } on CameraException catch (e) {
+      setState(() {
+        _errorMessage = 'Camera error: ${e.description}';
+      });
+    }
+  }
+
+  Future<void> _toggleFlash() async {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      return;
+    }
+
+    try {
+      if (_isFlashOn) {
+        await _cameraController!.setFlashMode(FlashMode.off);
+      } else {
+        await _cameraController!.setFlashMode(FlashMode.torch);
+      }
+      setState(() {
+        _isFlashOn = !_isFlashOn;
+      });
+    } catch (e) {
+      debugPrint('Error toggling flash: $e');
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _animationController.dispose();
+    _cameraController?.dispose();
     super.dispose();
   }
 
@@ -1810,30 +1920,61 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // Camera Preview Placeholder
-          Container(
-            color: const Color(0xFF1F2937),
-            child: Center(
+          // Camera Preview
+          if (_isCameraInitialized && _cameraController != null)
+            Positioned.fill(
+              child: AspectRatio(
+                aspectRatio: _cameraController!.value.aspectRatio,
+                child: CameraPreview(_cameraController!),
+              ),
+            )
+          else if (_errorMessage != null)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      size: 64,
+                      color: Colors.white.withOpacity(0.5),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      _errorMessage!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.7),
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: () => openAppSettings(),
+                      child: const Text('Open Settings'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
-                    Icons.camera_alt,
-                    size: 80,
-                    color: Colors.white.withOpacity(0.3),
-                  ),
+                  const CircularProgressIndicator(color: Colors.white),
                   const SizedBox(height: 16),
                   Text(
-                    'Camera Preview',
+                    'Initializing camera...',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.5),
+                      color: Colors.white.withOpacity(0.7),
                       fontSize: 16,
                     ),
                   ),
                 ],
               ),
             ),
-          ),
 
           // Scan Frame Overlay
           Center(
@@ -1896,11 +2037,11 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                           right: 0,
                           child: Container(
                             height: 2,
-                            decoration: BoxDecoration(
+                            decoration: const BoxDecoration(
                               gradient: LinearGradient(
                                 colors: [
                                   Colors.transparent,
-                                  const Color(0xFF10B981),
+                                  Color(0xFF10B981),
                                   Colors.transparent,
                                 ],
                               ),
@@ -1969,10 +2110,10 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                     ),
                   ),
                   IconButton(
-                    onPressed: () {},
-                    icon: const Icon(
-                      Icons.flash_off,
-                      color: Colors.white,
+                    onPressed: _isCameraInitialized ? _toggleFlash : null,
+                    icon: Icon(
+                      _isFlashOn ? Icons.flash_on : Icons.flash_off,
+                      color: _isFlashOn ? Colors.yellow : Colors.white,
                       size: 28,
                     ),
                   ),
@@ -2058,13 +2199,15 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
 
                       // Scan Button
                       GestureDetector(
-                        onTap: _isScanning ? null : _simulateScan,
+                        onTap: (_isScanning || !_isCameraInitialized)
+                            ? null
+                            : _captureAndProcess,
                         child: Container(
                           width: 80,
                           height: 80,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: _isScanning
+                            color: (_isScanning || !_isCameraInitialized)
                                 ? Colors.grey
                                 : const Color(0xFF2563EB),
                             border: Border.all(color: Colors.white, width: 4),
@@ -2122,13 +2265,50 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
     );
   }
 
-  Future<void> _simulateScan() async {
+  Future<void> _captureAndProcess() async {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      return;
+    }
+
     setState(() => _isScanning = true);
 
-    // Simulate scanning delay
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      // Capture the image
+      final XFile image = await _cameraController!.takePicture();
+      debugPrint('Image captured: ${image.path}');
 
-    // Generate random result
+      // TODO: Here you would process the image with OCR/ML
+      // For now, we'll simulate the processing
+      await Future.delayed(const Duration(seconds: 2));
+
+      // Generate simulated result (replace with actual OCR processing)
+      final result = _processImage(image.path);
+
+      appState.addScanResult(result);
+
+      setState(() {
+        _isScanning = false;
+        _scannedCount++;
+      });
+
+      if (mounted) {
+        _showResultDialog(result);
+      }
+    } catch (e) {
+      debugPrint('Error capturing image: $e');
+      setState(() => _isScanning = false);
+
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error capturing image: $e')));
+      }
+    }
+  }
+
+  ScanResult _processImage(String imagePath) {
+    // TODO: Implement actual OCR processing here
+    // For now, generate random results for demonstration
     final random = math.Random();
     final studentNames = [
       'John Doe',
@@ -2153,7 +2333,7 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
       }
     }
 
-    final result = ScanResult(
+    return ScanResult(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       studentName: studentNames[random.nextInt(studentNames.length)],
       score: score,
@@ -2162,19 +2342,8 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
       correctAnswers: widget.answerKey.answers,
       scannedAt: DateTime.now(),
       answerKeyName: widget.answerKey.name,
+      imagePath: imagePath,
     );
-
-    appState.addScanResult(result);
-
-    setState(() {
-      _isScanning = false;
-      _scannedCount++;
-    });
-
-    // Show result
-    if (mounted) {
-      _showResultDialog(result);
-    }
   }
 
   void _showResultDialog(ScanResult result) {
@@ -2524,7 +2693,7 @@ class ResultDetailScreen extends StatelessWidget {
                                       style: TextStyle(color: Colors.grey[600]),
                                     ),
                                     Text(
-                                      '${result.correctAnswers[index]}',
+                                      result.correctAnswers[index],
                                       style: const TextStyle(
                                         fontWeight: FontWeight.bold,
                                         color: Color(0xFF10B981),
