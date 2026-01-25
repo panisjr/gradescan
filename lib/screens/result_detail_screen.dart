@@ -1,4 +1,6 @@
-// ==================== RESULT DETAIL SCREEN ====================
+import 'package:flutter/material.dart';
+import '../models/models.dart';
+import '../widgets/common_widgets.dart';
 
 class ResultDetailScreen extends StatelessWidget {
   final ScanResult result;
@@ -93,7 +95,7 @@ class ResultDetailScreen extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      _ScoreItem(
+                      ScoreItem(
                         label: 'Score',
                         value: '${result.score}/${result.totalItems}',
                       ),
@@ -102,7 +104,7 @@ class ResultDetailScreen extends StatelessWidget {
                         height: 40,
                         color: Colors.white.withOpacity(0.3),
                       ),
-                      _ScoreItem(
+                      ScoreItem(
                         label: 'Percentage',
                         value: '${result.percentage.toStringAsFixed(0)}%',
                       ),
@@ -111,7 +113,7 @@ class ResultDetailScreen extends StatelessWidget {
                         height: 40,
                         color: Colors.white.withOpacity(0.3),
                       ),
-                      _ScoreItem(label: 'Correct', value: '${result.score}'),
+                      ScoreItem(label: 'Correct', value: '${result.score}'),
                     ],
                   ),
                 ],
@@ -228,33 +230,6 @@ class ResultDetailScreen extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _ScoreItem extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _ScoreItem({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-        ),
-        Text(
-          label,
-          style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.8)),
-        ),
-      ],
     );
   }
 }
