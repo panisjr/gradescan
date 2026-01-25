@@ -1,13 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'dart:math' as math;
-
-// Global camera list
-List<CameraDescription> cameras = [];
-
-// ==================== SPLASH SCREEN ====================
+import '../main.dart';
+import 'main_navigation_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -42,31 +37,26 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   void _initializeAnimations() {
-    // Logo animation controller
     _logoController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     );
 
-    // Text animation controller
     _textController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
     );
 
-    // Pulse animation controller
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     )..repeat(reverse: true);
 
-    // Loading animation controller
     _loadingController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     )..repeat();
 
-    // Logo scale animation
     _logoScaleAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _logoController,
@@ -74,7 +64,6 @@ class _SplashScreenState extends State<SplashScreen>
       ),
     );
 
-    // Logo rotate animation
     _logoRotateAnimation = Tween<double>(begin: -0.5, end: 0.0).animate(
       CurvedAnimation(
         parent: _logoController,
@@ -82,44 +71,36 @@ class _SplashScreenState extends State<SplashScreen>
       ),
     );
 
-    // Text opacity animation
     _textOpacityAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
     ).animate(CurvedAnimation(parent: _textController, curve: Curves.easeIn));
 
-    // Text slide animation
     _textSlideAnimation = Tween<Offset>(
       begin: const Offset(0, 0.5),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _textController, curve: Curves.easeOut));
 
-    // Pulse animation
     _pulseAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
 
-    // Loading animation
     _loadingAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _loadingController, curve: Curves.linear),
     );
   }
 
   void _startAnimationSequence() async {
-    // Start logo animation
     _logoController.forward();
 
-    // Show text after logo animation
     await Future.delayed(const Duration(milliseconds: 800));
     _textController.forward();
 
-    // Show tagline
     await Future.delayed(const Duration(milliseconds: 400));
     if (mounted) {
       setState(() => _showTagline = true);
     }
 
-    // Show loading indicator
     await Future.delayed(const Duration(milliseconds: 300));
     if (mounted) {
       setState(() => _showLoading = true);
@@ -127,17 +108,14 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _initializeApp() async {
-    // Initialize cameras
     try {
       cameras = await availableCameras();
     } on CameraException catch (e) {
       debugPrint('Error initializing cameras: ${e.description}');
     }
 
-    // Simulate loading time (minimum 3 seconds for splash)
     await Future.delayed(const Duration(milliseconds: 3000));
 
-    // Navigate to main screen
     if (mounted) {
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
@@ -177,15 +155,11 @@ class _SplashScreenState extends State<SplashScreen>
         ),
         child: Stack(
           children: [
-            // Background pattern
             ..._buildBackgroundPatterns(),
-
-            // Main content
             Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Animated Logo
                   AnimatedBuilder(
                     animation: _logoController,
                     builder: (context, child) {
@@ -207,10 +181,7 @@ class _SplashScreenState extends State<SplashScreen>
                       );
                     },
                   ),
-
                   const SizedBox(height: 32),
-
-                  // App Name
                   SlideTransition(
                     position: _textSlideAnimation,
                     child: FadeTransition(
@@ -233,10 +204,7 @@ class _SplashScreenState extends State<SplashScreen>
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 12),
-
-                  // Tagline
                   AnimatedOpacity(
                     duration: const Duration(milliseconds: 500),
                     opacity: _showTagline ? 1.0 : 0.0,
@@ -254,10 +222,7 @@ class _SplashScreenState extends State<SplashScreen>
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 60),
-
-                  // Loading indicator
                   AnimatedOpacity(
                     duration: const Duration(milliseconds: 300),
                     opacity: _showLoading ? 1.0 : 0.0,
@@ -266,8 +231,6 @@ class _SplashScreenState extends State<SplashScreen>
                 ],
               ),
             ),
-
-            // Version info at bottom
             Positioned(
               bottom: 40,
               left: 0,
@@ -420,7 +383,6 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
-// Custom loading painter
 class _LoadingPainter extends CustomPainter {
   final double progress;
   final Color color;
@@ -464,7 +426,6 @@ class _LoadingPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
 
-// Floating circle widget
 class _FloatingCircle extends StatefulWidget {
   final double size;
   final Color color;
