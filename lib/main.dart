@@ -10,12 +10,13 @@ List<CameraDescription> cameras = [];
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize cameras
-  try {
-    cameras = await availableCameras();
-  } on CameraException catch (e) {
-    debugPrint('Error initializing cameras: ${e.description}');
-  }
+  // Set status bar style
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+    ),
+  );
 
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   runApp(const GradeScanApp());
@@ -39,7 +40,523 @@ class GradeScanApp extends StatelessWidget {
         useMaterial3: true,
         appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0),
       ),
-      home: const MainNavigationScreen(),
+      home: const SplashScreen(),
+    );
+  }
+}
+
+// ==================== SPLASH SCREEN ====================
+
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen>
+    with TickerProviderStateMixin {
+  late AnimationController _logoController;
+  late AnimationController _textController;
+  late AnimationController _pulseController;
+  late AnimationController _loadingController;
+
+  late Animation<double> _logoScaleAnimation;
+  late Animation<double> _logoRotateAnimation;
+  late Animation<double> _textOpacityAnimation;
+  late Animation<Offset> _textSlideAnimation;
+  late Animation<double> _pulseAnimation;
+  late Animation<double> _loadingAnimation;
+
+  bool _showTagline = false;
+  bool _showLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeAnimations();
+    _startAnimationSequence();
+    _initializeApp();
+  }
+
+  void _initializeAnimations() {
+    // Logo animation controller
+    _logoController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
+
+    // Text animation controller
+    _textController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+
+    // Pulse animation controller
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
+
+    // Loading animation controller
+    _loadingController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..repeat();
+
+    // Logo scale animation
+    _logoScaleAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _logoController,
+        curve: const Interval(0.0, 0.6, curve: Curves.elasticOut),
+      ),
+    );
+
+    // Logo rotate animation
+    _logoRotateAnimation = Tween<double>(begin: -0.5, end: 0.0).animate(
+      CurvedAnimation(
+        parent: _logoController,
+        curve: const Interval(0.0, 0.6, curve: Curves.easeOutBack),
+      ),
+    );
+
+    // Text opacity animation
+    _textOpacityAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _textController, curve: Curves.easeIn));
+
+    // Text slide animation
+    _textSlideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.5),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _textController, curve: Curves.easeOut));
+
+    // Pulse animation
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+
+    // Loading animation
+    _loadingAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _loadingController, curve: Curves.linear),
+    );
+  }
+
+  void _startAnimationSequence() async {
+    // Start logo animation
+    _logoController.forward();
+
+    // Show text after logo animation
+    await Future.delayed(const Duration(milliseconds: 800));
+    _textController.forward();
+
+    // Show tagline
+    await Future.delayed(const Duration(milliseconds: 400));
+    if (mounted) {
+      setState(() => _showTagline = true);
+    }
+
+    // Show loading indicator
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (mounted) {
+      setState(() => _showLoading = true);
+    }
+  }
+
+  Future<void> _initializeApp() async {
+    // Initialize cameras
+    try {
+      cameras = await availableCameras();
+    } on CameraException catch (e) {
+      debugPrint('Error initializing cameras: ${e.description}');
+    }
+
+    // Simulate loading time (minimum 3 seconds for splash)
+    await Future.delayed(const Duration(milliseconds: 3000));
+
+    // Navigate to main screen
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              const MainNavigationScreen(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+          transitionDuration: const Duration(milliseconds: 500),
+        ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _logoController.dispose();
+    _textController.dispose();
+    _pulseController.dispose();
+    _loadingController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF1E40AF), Color(0xFF2563EB), Color(0xFF7C3AED)],
+            stops: [0.0, 0.5, 1.0],
+          ),
+        ),
+        child: Stack(
+          children: [
+            // Background pattern
+            ..._buildBackgroundPatterns(),
+
+            // Main content
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Animated Logo
+                  AnimatedBuilder(
+                    animation: _logoController,
+                    builder: (context, child) {
+                      return Transform.scale(
+                        scale: _logoScaleAnimation.value,
+                        child: Transform.rotate(
+                          angle: _logoRotateAnimation.value,
+                          child: AnimatedBuilder(
+                            animation: _pulseController,
+                            builder: (context, child) {
+                              return Transform.scale(
+                                scale: _pulseAnimation.value,
+                                child: child,
+                              );
+                            },
+                            child: _buildLogo(),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 32),
+
+                  // App Name
+                  SlideTransition(
+                    position: _textSlideAnimation,
+                    child: FadeTransition(
+                      opacity: _textOpacityAnimation,
+                      child: const Text(
+                        'GradeScan',
+                        style: TextStyle(
+                          fontSize: 42,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          letterSpacing: 2,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black26,
+                              blurRadius: 10,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Tagline
+                  AnimatedOpacity(
+                    duration: const Duration(milliseconds: 500),
+                    opacity: _showTagline ? 1.0 : 0.0,
+                    child: AnimatedSlide(
+                      duration: const Duration(milliseconds: 500),
+                      offset: _showTagline ? Offset.zero : const Offset(0, 0.5),
+                      child: Text(
+                        'Smart Answer Sheet Scanner',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.white.withOpacity(0.9),
+                          letterSpacing: 1,
+                          fontWeight: FontWeight.w300,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 60),
+
+                  // Loading indicator
+                  AnimatedOpacity(
+                    duration: const Duration(milliseconds: 300),
+                    opacity: _showLoading ? 1.0 : 0.0,
+                    child: _buildLoadingIndicator(),
+                  ),
+                ],
+              ),
+            ),
+
+            // Version info at bottom
+            Positioned(
+              bottom: 40,
+              left: 0,
+              right: 0,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 500),
+                opacity: _showLoading ? 1.0 : 0.0,
+                child: Column(
+                  children: [
+                    Text(
+                      'Version 1.0.0',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.6),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Made with ❤️ for Educators',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.6),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLogo() {
+    return Container(
+      width: 140,
+      height: 140,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(35),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 30,
+            offset: const Offset(0, 15),
+          ),
+          BoxShadow(
+            color: const Color(0xFF7C3AED).withOpacity(0.5),
+            blurRadius: 60,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          const Icon(
+            Icons.document_scanner_rounded,
+            size: 70,
+            color: Color(0xFF2563EB),
+          ),
+          Positioned(
+            right: 15,
+            bottom: 15,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: const BoxDecoration(
+                color: Color(0xFF10B981),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.check, color: Colors.white, size: 20),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadingIndicator() {
+    return Column(
+      children: [
+        SizedBox(
+          width: 200,
+          child: AnimatedBuilder(
+            animation: _loadingController,
+            builder: (context, child) {
+              return CustomPaint(
+                painter: _LoadingPainter(
+                  progress: _loadingAnimation.value,
+                  color: Colors.white,
+                ),
+                size: const Size(200, 4),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Loading...',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.8),
+            fontSize: 14,
+            fontWeight: FontWeight.w300,
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildBackgroundPatterns() {
+    return [
+      Positioned(
+        top: -50,
+        right: -50,
+        child: _FloatingCircle(
+          size: 200,
+          color: Colors.white.withOpacity(0.05),
+          duration: const Duration(seconds: 4),
+        ),
+      ),
+      Positioned(
+        bottom: -100,
+        left: -50,
+        child: _FloatingCircle(
+          size: 300,
+          color: Colors.white.withOpacity(0.05),
+          duration: const Duration(seconds: 5),
+        ),
+      ),
+      Positioned(
+        top: 150,
+        left: -80,
+        child: _FloatingCircle(
+          size: 150,
+          color: Colors.white.withOpacity(0.03),
+          duration: const Duration(seconds: 3),
+        ),
+      ),
+      Positioned(
+        bottom: 200,
+        right: -40,
+        child: _FloatingCircle(
+          size: 120,
+          color: Colors.white.withOpacity(0.04),
+          duration: const Duration(seconds: 6),
+        ),
+      ),
+    ];
+  }
+}
+
+// Custom loading painter
+class _LoadingPainter extends CustomPainter {
+  final double progress;
+  final Color color;
+
+  _LoadingPainter({required this.progress, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final backgroundPaint = Paint()
+      ..color = color.withOpacity(0.3)
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 4
+      ..style = PaintingStyle.stroke;
+
+    final progressPaint = Paint()
+      ..color = color
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 4
+      ..style = PaintingStyle.stroke;
+
+    canvas.drawLine(
+      Offset(0, size.height / 2),
+      Offset(size.width, size.height / 2),
+      backgroundPaint,
+    );
+
+    final progressWidth = size.width * 0.3;
+    final startX = (size.width + progressWidth) * progress - progressWidth;
+    final endX = startX + progressWidth;
+
+    if (endX > 0 && startX < size.width) {
+      canvas.drawLine(
+        Offset(math.max(0, startX), size.height / 2),
+        Offset(math.min(size.width, endX), size.height / 2),
+        progressPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+// Floating circle widget
+class _FloatingCircle extends StatefulWidget {
+  final double size;
+  final Color color;
+  final Duration duration;
+
+  const _FloatingCircle({
+    required this.size,
+    required this.color,
+    required this.duration,
+  });
+
+  @override
+  State<_FloatingCircle> createState() => _FloatingCircleState();
+}
+
+class _FloatingCircleState extends State<_FloatingCircle>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: widget.duration)
+      ..repeat(reverse: true);
+    _animation = Tween<double>(
+      begin: 0,
+      end: 20,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        return Transform.translate(
+          offset: Offset(0, _animation.value),
+          child: Container(
+            width: widget.size,
+            height: widget.size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: widget.color,
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -427,7 +944,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 12),
               if (appState.scanResults.isEmpty)
-                _EmptyState(
+                const _EmptyState(
                   icon: Icons.document_scanner_outlined,
                   title: 'No scans yet',
                   subtitle: 'Start scanning answer sheets to see results here',
@@ -578,6 +1095,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
+
+// ==================== REUSABLE WIDGETS ====================
 
 class _StatCard extends StatelessWidget {
   final IconData icon;
@@ -974,7 +1493,7 @@ class _AnswerKeysListSheetState extends State<_AnswerKeysListSheet> {
           const SizedBox(height: 16),
           Expanded(
             child: appState.answerKeys.isEmpty
-                ? Center(
+                ? const Center(
                     child: _EmptyState(
                       icon: Icons.key_outlined,
                       title: 'No answer keys yet',
@@ -1144,7 +1663,6 @@ class _CreateAnswerKeyScreenState extends State<CreateAnswerKeyScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Name Input
             const Text(
               'Answer Key Name',
               style: TextStyle(
@@ -1179,7 +1697,6 @@ class _CreateAnswerKeyScreenState extends State<CreateAnswerKeyScreen> {
             ),
             const SizedBox(height: 20),
 
-            // Number of Items
             const Text(
               'Number of Items',
               style: TextStyle(
@@ -1255,7 +1772,7 @@ class _CreateAnswerKeyScreenState extends State<CreateAnswerKeyScreen> {
             ),
             const SizedBox(height: 24),
 
-            // Progress Indicator
+            // Progress
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -1305,7 +1822,6 @@ class _CreateAnswerKeyScreenState extends State<CreateAnswerKeyScreen> {
             ),
             const SizedBox(height: 24),
 
-            // Answer Input Section
             const Text(
               'Set Answers',
               style: TextStyle(
@@ -1422,7 +1938,7 @@ class _CreateAnswerKeyScreenState extends State<CreateAnswerKeyScreen> {
             ),
             const SizedBox(height: 20),
 
-            // Answer Grid Overview
+            // Answer Grid
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -1603,7 +2119,6 @@ class _ScanScreenState extends State<ScanScreen> {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            // Selected Answer Key
             if (appState.selectedAnswerKey != null)
               Container(
                 padding: const EdgeInsets.all(16),
@@ -1651,7 +2166,6 @@ class _ScanScreenState extends State<ScanScreen> {
               ),
             const SizedBox(height: 24),
 
-            // Scan Illustration
             Expanded(
               child: Center(
                 child: Column(
@@ -1694,7 +2208,6 @@ class _ScanScreenState extends State<ScanScreen> {
               ),
             ),
 
-            // Action Buttons
             if (appState.answerKeys.isEmpty)
               SizedBox(
                 width: double.infinity,
@@ -1786,7 +2299,7 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 }
 
-// ==================== ACTIVE SCAN SCREEN WITH REAL CAMERA ====================
+// ==================== ACTIVE SCAN SCREEN ====================
 
 class ActiveScanScreen extends StatefulWidget {
   final AnswerKey answerKey;
@@ -1834,7 +2347,6 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
   }
 
   Future<void> _initializeCamera() async {
-    // Request camera permission
     final status = await Permission.camera.request();
 
     if (status.isDenied) {
@@ -1859,7 +2371,6 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
       return;
     }
 
-    // Select the back camera
     final CameraDescription camera = cameras.firstWhere(
       (camera) => camera.lensDirection == CameraLensDirection.back,
       orElse: () => cameras.first,
@@ -1922,12 +2433,7 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
         children: [
           // Camera Preview
           if (_isCameraInitialized && _cameraController != null)
-            Positioned.fill(
-              child: AspectRatio(
-                aspectRatio: _cameraController!.value.aspectRatio,
-                child: CameraPreview(_cameraController!),
-              ),
-            )
+            Positioned.fill(child: CameraPreview(_cameraController!))
           else if (_errorMessage != null)
             Center(
               child: Padding(
@@ -1976,7 +2482,7 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
               ),
             ),
 
-          // Scan Frame Overlay
+          // Scan Frame
           Center(
             child: AnimatedBuilder(
               animation: _animationController,
@@ -1999,7 +2505,6 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                   ),
                   child: Stack(
                     children: [
-                      // Corner indicators
                       Positioned(
                         top: -2,
                         left: -2,
@@ -2029,7 +2534,6 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                           child: _CornerIndicator(isScanning: _isScanning),
                         ),
                       ),
-                      // Scanning line
                       if (_isScanning)
                         Positioned(
                           top: 380 * _animationController.value,
@@ -2143,7 +2647,6 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
               ),
               child: Column(
                 children: [
-                  // Instructions
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
@@ -2163,12 +2666,9 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                     ),
                   ),
                   const SizedBox(height: 24),
-
-                  // Scan Button and Counter
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      // Scanned Count
                       Column(
                         children: [
                           Container(
@@ -2196,8 +2696,6 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                           ),
                         ],
                       ),
-
-                      // Scan Button
                       GestureDetector(
                         onTap: (_isScanning || !_isCameraInitialized)
                             ? null
@@ -2219,15 +2717,11 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                           ),
                         ),
                       ),
-
-                      // View Results
                       Column(
                         children: [
                           GestureDetector(
                             onTap: _scannedCount > 0
-                                ? () {
-                                    Navigator.pop(context);
-                                  }
+                                ? () => Navigator.pop(context)
                                 : null,
                             child: Container(
                               padding: const EdgeInsets.all(12),
@@ -2273,17 +2767,12 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
     setState(() => _isScanning = true);
 
     try {
-      // Capture the image
       final XFile image = await _cameraController!.takePicture();
       debugPrint('Image captured: ${image.path}');
 
-      // TODO: Here you would process the image with OCR/ML
-      // For now, we'll simulate the processing
       await Future.delayed(const Duration(seconds: 2));
 
-      // Generate simulated result (replace with actual OCR processing)
       final result = _processImage(image.path);
-
       appState.addScanResult(result);
 
       setState(() {
@@ -2307,8 +2796,6 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
   }
 
   ScanResult _processImage(String imagePath) {
-    // TODO: Implement actual OCR processing here
-    // For now, generate random results for demonstration
     final random = math.Random();
     final studentNames = [
       'John Doe',
@@ -2530,7 +3017,6 @@ class ResultDetailScreen extends StatelessWidget {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            // Score Card
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
@@ -2615,8 +3101,6 @@ class ResultDetailScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 24),
-
-            // Answer Breakdown
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -2851,7 +3335,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         ],
       ),
       body: appState.scanResults.isEmpty
-          ? Center(
+          ? const Center(
               child: _EmptyState(
                 icon: Icons.history,
                 title: 'No scan history',
@@ -2909,7 +3393,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // App Info Card
+            // App Info
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -3152,7 +3636,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 32),
 
-            // Footer
             Center(
               child: Text(
                 'Made with ❤️ for Educators',
