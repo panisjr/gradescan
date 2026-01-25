@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:camera/camera.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'dart:math' as math;
+import '../main.dart'; // For cameras global variable
 import '../models/models.dart';
 import '../state/app_state.dart';
+import 'result_detail_screen.dart';
 
 // ==================== ACTIVE SCAN SCREEN WITH REAL CAMERA ====================
 
@@ -138,12 +143,7 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
         children: [
           // Camera Preview
           if (_isCameraInitialized && _cameraController != null)
-            Positioned.fill(
-              child: AspectRatio(
-                aspectRatio: _cameraController!.value.aspectRatio,
-                child: CameraPreview(_cameraController!),
-              ),
-            )
+            Positioned.fill(child: CameraPreview(_cameraController!))
           else if (_errorMessage != null)
             Center(
               child: Padding(
