@@ -249,7 +249,7 @@ class _SplashScreenState extends State<SplashScreen>
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Made with ❤️ for Educators',
+                      'PARAMZ',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.6),
                         fontSize: 12,
@@ -265,12 +265,12 @@ class _SplashScreenState extends State<SplashScreen>
     );
   }
 
+  // ============ UPDATED LOGO WITH CUSTOM IMAGE ============
   Widget _buildLogo() {
     return Container(
       width: 140,
       height: 140,
       decoration: BoxDecoration(
-        color: Colors.white,
         borderRadius: BorderRadius.circular(35),
         boxShadow: [
           BoxShadow(
@@ -285,27 +285,9 @@ class _SplashScreenState extends State<SplashScreen>
           ),
         ],
       ),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          const Icon(
-            Icons.document_scanner_rounded,
-            size: 70,
-            color: Color(0xFF2563EB),
-          ),
-          Positioned(
-            right: 15,
-            bottom: 15,
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: const BoxDecoration(
-                color: Color(0xFF10B981),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.check, color: Colors.white, size: 20),
-            ),
-          ),
-        ],
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(35),
+        child: Image.asset('assets/icon/gradescan-logo.png', fit: BoxFit.cover),
       ),
     );
   }

@@ -43,14 +43,14 @@ dependencies:
 
 flutter_native_splash:
   color: "#2563EB"
-  image: assets/icon/gradescan-icon.png
+  image: assets/icon/gradescan-logo.png
   color_dark: "#1E40AF"
-  image_dark: assets/icon/gradescan-icon.png
+  image_dark: assets/icon/gradescan-logo.png
   
   android_12:
     color: "#2563EB"
     icon_background_color: "#2563EB"
-    image: assets/icon/gradescan-icon.png
+    image: assets/icon/gradescan-logo.png
     
   ios: true
   android: true
@@ -73,7 +73,7 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: false
-  image_path: assets/icon/gradescan-icon.png
+  image_path: assets/icon/gradescan-logo.png
 
 # The following section is specific to Flutter packages.
 flutter:
@@ -82,7 +82,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
-
+  assets:
+    - assets/icon/
+    - assets/icon/gradescan-logo.png
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg
