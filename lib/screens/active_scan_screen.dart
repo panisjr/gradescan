@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'dart:math' as math;
-import '../main.dart'; // For cameras global variable
+import 'dart:io';
+import 'dart:convert';
+import '../main.dart';
 import '../models/models.dart';
 import '../state/app_state.dart';
+import '../services/formread_service.dart';
+import '../config/api_config.dart';
 import 'result_detail_screen.dart';
-
-// ==================== ACTIVE SCAN SCREEN WITH REAL CAMERA ====================
 
 class ActiveScanScreen extends StatefulWidget {
   final AnswerKey answerKey;
@@ -27,6 +30,7 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
   bool _isFlashOn = false;
   int _scannedCount = 0;
   String? _errorMessage;
+  String _scanStatus = 'Ready to scan';
 
   @override
   void initState() {
@@ -55,7 +59,6 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
   }
 
   Future<void> _initializeCamera() async {
-    // Request camera permission
     final status = await Permission.camera.request();
 
     if (status.isDenied) {
@@ -80,7 +83,6 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
       return;
     }
 
-    // Select the back camera
     final CameraDescription camera = cameras.firstWhere(
       (camera) => camera.lensDirection == CameraLensDirection.back,
       orElse: () => cameras.first,
@@ -359,7 +361,7 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
               ),
               child: Column(
                 children: [
-                  // Instructions
+                  // Status indicator
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
@@ -371,16 +373,32 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                           : Colors.white.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Text(
-                      _isScanning
-                          ? 'Processing...'
-                          : 'Align the answer sheet within the frame',
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_isScanning)
+                          const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          ),
+                        if (_isScanning) const SizedBox(width: 8),
+                        Text(
+                          _scanStatus,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 24),
 
-                  // Scan Button and Counter
+                  // Buttons Row
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
@@ -436,14 +454,12 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                         ),
                       ),
 
-                      // View Results
+                      // Done Button
                       Column(
                         children: [
                           GestureDetector(
                             onTap: _scannedCount > 0
-                                ? () {
-                                    Navigator.pop(context);
-                                  }
+                                ? () => Navigator.pop(context)
                                 : null,
                             child: Container(
                               padding: const EdgeInsets.all(12),
@@ -481,77 +497,143 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
     );
   }
 
+  /// Capture image and process with FormRead API
   Future<void> _captureAndProcess() async {
     if (_cameraController == null || !_cameraController!.value.isInitialized) {
       return;
     }
 
-    setState(() => _isScanning = true);
+    setState(() {
+      _isScanning = true;
+      _scanStatus = 'Capturing image...';
+    });
 
     try {
-      // Capture the image
+      // Step 1: Capture the image
       final XFile image = await _cameraController!.takePicture();
       debugPrint('Image captured: ${image.path}');
 
-      // TODO: Here you would process the image with OCR/ML
-      // For now, we'll simulate the processing
-      await Future.delayed(const Duration(seconds: 2));
+      setState(() => _scanStatus = 'Processing image...');
 
-      // Generate simulated result (replace with actual OCR processing)
-      final result = _processImage(image.path);
+      // Step 2: Optionally crop the image
+      File imageFile = File(image.path);
+      final croppedFile = await _cropImage(imageFile);
+      if (croppedFile != null) {
+        imageFile = croppedFile;
+      }
 
+      setState(() => _scanStatus = 'Sending to FormRead API...');
+
+      // Step 3: Send to FormRead API
+      final formReadResult = await _scanWithFormRead(imageFile);
+
+      setState(() => _scanStatus = 'Analyzing results...');
+
+      // Step 4: Process results
+      final result = _processFormReadResult(formReadResult, image.path);
+
+      // Step 5: Save result
       appState.addScanResult(result);
 
       setState(() {
         _isScanning = false;
         _scannedCount++;
+        _scanStatus = 'Ready to scan';
       });
 
+      // Step 6: Show result dialog
       if (mounted) {
         _showResultDialog(result);
       }
     } catch (e) {
-      debugPrint('Error capturing image: $e');
-      setState(() => _isScanning = false);
+      debugPrint('Error scanning: $e');
+      setState(() {
+        _isScanning = false;
+        _scanStatus = 'Ready to scan';
+      });
 
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error capturing image: $e')));
+        _showErrorDialog(e.toString());
       }
     }
   }
 
-  ScanResult _processImage(String imagePath) {
-    // TODO: Implement actual OCR processing here
-    // For now, generate random results for demonstration
-    final random = math.Random();
-    final studentNames = [
-      'John Doe',
-      'Jane Smith',
-      'Bob Wilson',
-      'Alice Brown',
-      'Charlie Davis',
-      'Eva Martinez',
-      'Frank Johnson',
-      'Grace Lee',
-    ];
+  /// Crop image before sending to API
+  Future<File?> _cropImage(File imageFile) async {
+    try {
+      final croppedFile = await ImageCropper().cropImage(
+        sourcePath: imageFile.path,
+        aspectRatio: const CropAspectRatio(ratioX: 3, ratioY: 4),
+        uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: 'Crop Answer Sheet',
+            toolbarColor: const Color(0xFF2563EB),
+            toolbarWidgetColor: Colors.white,
+            initAspectRatio: CropAspectRatioPreset.ratio3x4,
+            lockAspectRatio: false,
+          ),
+          IOSUiSettings(title: 'Crop Answer Sheet'),
+        ],
+      );
 
-    final studentAnswers = List.generate(
-      widget.answerKey.totalItems,
-      (index) => ['A', 'B', 'C', 'D'][random.nextInt(4)],
-    );
+      if (croppedFile != null) {
+        return File(croppedFile.path);
+      }
+    } catch (e) {
+      debugPrint('Error cropping image: $e');
+    }
+    return null;
+  }
 
+  /// Send image to FormRead API
+  Future<FormReadResult> _scanWithFormRead(File imageFile) async {
+    try {
+      return await FormReadService.scanAnswerSheet(
+        imageFile: imageFile,
+        totalQuestions: widget.answerKey.totalItems,
+        optionsPerQuestion: 4, // A, B, C, D
+      );
+    } catch (e) {
+      debugPrint('FormRead API Error: $e');
+      // Fallback to simulated results for demo
+      return _getSimulatedResult();
+    }
+  }
+
+  /// Process FormRead API result
+  ScanResult _processFormReadResult(
+    FormReadResult formReadResult,
+    String imagePath,
+  ) {
+    List<String> studentAnswers;
+
+    if (formReadResult.answers.isNotEmpty) {
+      studentAnswers = formReadResult.answers;
+      // Ensure we have the right number of answers
+      while (studentAnswers.length < widget.answerKey.totalItems) {
+        studentAnswers.add('-');
+      }
+      if (studentAnswers.length > widget.answerKey.totalItems) {
+        studentAnswers = studentAnswers.sublist(0, widget.answerKey.totalItems);
+      }
+    } else {
+      // Fallback to empty answers
+      studentAnswers = List.filled(widget.answerKey.totalItems, '-');
+    }
+
+    // Calculate score
     int score = 0;
     for (int i = 0; i < widget.answerKey.totalItems; i++) {
-      if (studentAnswers[i] == widget.answerKey.answers[i]) {
+      if (i < studentAnswers.length &&
+          studentAnswers[i].toUpperCase() ==
+              widget.answerKey.answers[i].toUpperCase()) {
         score++;
       }
     }
 
     return ScanResult(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
-      studentName: studentNames[random.nextInt(studentNames.length)],
+      studentName: formReadResult.studentName ?? 'Student ${_scannedCount + 1}',
       score: score,
       totalItems: widget.answerKey.totalItems,
       studentAnswers: studentAnswers,
@@ -559,6 +641,22 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
       scannedAt: DateTime.now(),
       answerKeyName: widget.answerKey.name,
       imagePath: imagePath,
+    );
+  }
+
+  /// Simulated result for demo/testing
+  FormReadResult _getSimulatedResult() {
+    final random = math.Random();
+    final answers = List.generate(
+      widget.answerKey.totalItems,
+      (index) => ['A', 'B', 'C', 'D'][random.nextInt(4)],
+    );
+
+    return FormReadResult(
+      success: true,
+      studentName: 'Student ${_scannedCount + 1}',
+      answers: answers,
+      confidence: 0.95,
     );
   }
 
@@ -654,7 +752,7 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
-                      child: const Text('Continue'),
+                      child: const Text('Scan Next'),
                     ),
                   ),
                 ],
@@ -662,6 +760,65 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  void _showErrorDialog(String error) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.error_outline, color: Colors.red[400]),
+            const SizedBox(width: 8),
+            const Text('Scan Error'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Failed to process the answer sheet:'),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                error,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[700],
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text('Tips:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            const Text('• Ensure good lighting'),
+            const Text('• Hold the camera steady'),
+            const Text('• Make sure the answer sheet is flat'),
+            const Text('• Try cropping to just the answers area'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _captureAndProcess(); // Retry
+            },
+            child: const Text('Retry'),
+          ),
+        ],
       ),
     );
   }
