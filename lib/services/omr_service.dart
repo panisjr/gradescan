@@ -12,7 +12,7 @@ class OMRService {
     required File imageFile,
     required int totalQuestions,
   }) async {
-    const apiKey = 'YOUR_GOOGLE_CLOUD_API_KEY';
+    const apiKey = 'AIzaSyDYVoGVIqwtDRFikct5YZ0jbFyNky9zfZ4';
     const url = 'https://vision.googleapis.com/v1/images:annotate?key=$apiKey';
 
     final bytes = await imageFile.readAsBytes();

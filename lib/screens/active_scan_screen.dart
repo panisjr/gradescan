@@ -4,12 +4,10 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'dart:math' as math;
 import 'dart:io';
-import 'dart:convert';
 import '../main.dart';
 import '../models/models.dart';
 import '../state/app_state.dart';
-import '../services/formread_service.dart';
-import '../config/api_config.dart';
+import '../services/ocr_service.dart';
 import 'result_detail_screen.dart';
 
 class ActiveScanScreen extends StatefulWidget {
@@ -31,6 +29,7 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
   int _scannedCount = 0;
   String? _errorMessage;
   String _scanStatus = 'Ready to scan';
+  bool _useCloudOCR = false; // Toggle for cloud vs on-device
 
   @override
   void initState() {
@@ -303,28 +302,36 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                       size: 28,
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.key, color: Colors.white, size: 16),
-                        const SizedBox(width: 8),
-                        Text(
-                          widget.answerKey.name,
-                          style: const TextStyle(
+                  // Answer Key Badge
+                  GestureDetector(
+                    onTap: () => _showOCRSettings(),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _useCloudOCR ? Icons.cloud : Icons.phone_android,
                             color: Colors.white,
-                            fontWeight: FontWeight.w600,
+                            size: 16,
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 8),
+                          Text(
+                            widget.answerKey.name,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   IconButton(
@@ -497,7 +504,115 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
     );
   }
 
-  /// Capture image and process with FormRead API
+  void _showOCRSettings() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'OCR Settings',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2563EB).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.phone_android,
+                  color: Color(0xFF2563EB),
+                ),
+              ),
+              title: const Text('On-Device (ML Kit)'),
+              subtitle: const Text('Free, fast, works offline'),
+              trailing: Radio<bool>(
+                value: false,
+                groupValue: _useCloudOCR,
+                onChanged: (value) {
+                  setState(() => _useCloudOCR = false);
+                  Navigator.pop(context);
+                },
+              ),
+              onTap: () {
+                setState(() => _useCloudOCR = false);
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.cloud, color: Color(0xFF10B981)),
+              ),
+              title: const Text('Cloud (OCR.space)'),
+              subtitle: const Text('More accurate, requires internet'),
+              trailing: Radio<bool>(
+                value: true,
+                groupValue: _useCloudOCR,
+                onChanged: (value) {
+                  setState(() => _useCloudOCR = true);
+                  Navigator.pop(context);
+                },
+              ),
+              onTap: () {
+                setState(() => _useCloudOCR = true);
+                Navigator.pop(context);
+              },
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Tip: Use good lighting and hold the camera steady for best results.',
+                      style: TextStyle(fontSize: 12, color: Colors.blue[700]),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Capture image and process with OCR
   Future<void> _captureAndProcess() async {
     if (_cameraController == null || !_cameraController!.value.isInitialized) {
       return;
@@ -522,15 +637,26 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
         imageFile = croppedFile;
       }
 
-      setState(() => _scanStatus = 'Sending to FormRead API...');
+      setState(
+        () => _scanStatus = _useCloudOCR
+            ? 'Sending to cloud OCR...'
+            : 'Running on-device OCR...',
+      );
 
-      // Step 3: Send to FormRead API
-      final formReadResult = await _scanWithFormRead(imageFile);
+      // Step 3: Run OCR
+      final ocrResult = await OCRService.scan(
+        imageFile: imageFile,
+        totalQuestions: widget.answerKey.totalItems,
+        optionsPerQuestion: 4,
+        preferCloud: _useCloudOCR,
+      );
+
+      debugPrint('OCR Result: $ocrResult');
 
       setState(() => _scanStatus = 'Analyzing results...');
 
       // Step 4: Process results
-      final result = _processFormReadResult(formReadResult, image.path);
+      final result = _processOCRResult(ocrResult, image.path);
 
       // Step 5: Save result
       appState.addScanResult(result);
@@ -543,7 +669,7 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
 
       // Step 6: Show result dialog
       if (mounted) {
-        _showResultDialog(result);
+        _showResultDialog(result, ocrResult);
       }
     } catch (e) {
       debugPrint('Error scanning: $e');
@@ -558,19 +684,19 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
     }
   }
 
-  /// Crop image before sending to API
+  /// Crop image before OCR
   Future<File?> _cropImage(File imageFile) async {
     try {
       final croppedFile = await ImageCropper().cropImage(
         sourcePath: imageFile.path,
-        aspectRatio: const CropAspectRatio(ratioX: 3, ratioY: 4),
         uiSettings: [
           AndroidUiSettings(
             toolbarTitle: 'Crop Answer Sheet',
             toolbarColor: const Color(0xFF2563EB),
             toolbarWidgetColor: Colors.white,
-            initAspectRatio: CropAspectRatioPreset.ratio3x4,
+            initAspectRatio: CropAspectRatioPreset.original,
             lockAspectRatio: false,
+            hideBottomControls: false,
           ),
           IOSUiSettings(title: 'Crop Answer Sheet'),
         ],
@@ -585,40 +711,16 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
     return null;
   }
 
-  /// Send image to FormRead API
-  Future<FormReadResult> _scanWithFormRead(File imageFile) async {
-    try {
-      return await FormReadService.scanAnswerSheet(
-        imageFile: imageFile,
-        totalQuestions: widget.answerKey.totalItems,
-        optionsPerQuestion: 4, // A, B, C, D
-      );
-    } catch (e) {
-      debugPrint('FormRead API Error: $e');
-      // Fallback to simulated results for demo
-      return _getSimulatedResult();
+  /// Process OCR result into ScanResult
+  ScanResult _processOCRResult(OMRResult ocrResult, String imagePath) {
+    List<String> studentAnswers = ocrResult.answers;
+
+    // Ensure we have the right number of answers
+    while (studentAnswers.length < widget.answerKey.totalItems) {
+      studentAnswers.add('-');
     }
-  }
-
-  /// Process FormRead API result
-  ScanResult _processFormReadResult(
-    FormReadResult formReadResult,
-    String imagePath,
-  ) {
-    List<String> studentAnswers;
-
-    if (formReadResult.answers.isNotEmpty) {
-      studentAnswers = formReadResult.answers;
-      // Ensure we have the right number of answers
-      while (studentAnswers.length < widget.answerKey.totalItems) {
-        studentAnswers.add('-');
-      }
-      if (studentAnswers.length > widget.answerKey.totalItems) {
-        studentAnswers = studentAnswers.sublist(0, widget.answerKey.totalItems);
-      }
-    } else {
-      // Fallback to empty answers
-      studentAnswers = List.filled(widget.answerKey.totalItems, '-');
+    if (studentAnswers.length > widget.answerKey.totalItems) {
+      studentAnswers = studentAnswers.sublist(0, widget.answerKey.totalItems);
     }
 
     // Calculate score
@@ -631,9 +733,14 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
       }
     }
 
+    // Generate student name
+    String studentName =
+        ocrResult.studentName ??
+        'Student ${DateTime.now().millisecondsSinceEpoch % 1000}';
+
     return ScanResult(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
-      studentName: formReadResult.studentName ?? 'Student ${_scannedCount + 1}',
+      studentName: studentName,
       score: score,
       totalItems: widget.answerKey.totalItems,
       studentAnswers: studentAnswers,
@@ -644,23 +751,7 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
     );
   }
 
-  /// Simulated result for demo/testing
-  FormReadResult _getSimulatedResult() {
-    final random = math.Random();
-    final answers = List.generate(
-      widget.answerKey.totalItems,
-      (index) => ['A', 'B', 'C', 'D'][random.nextInt(4)],
-    );
-
-    return FormReadResult(
-      success: true,
-      studentName: 'Student ${_scannedCount + 1}',
-      answers: answers,
-      confidence: 0.95,
-    );
-  }
-
-  void _showResultDialog(ScanResult result) {
+  void _showResultDialog(ScanResult result, OMRResult ocrResult) {
     final color = result.percentage >= 75
         ? const Color(0xFF10B981)
         : result.percentage >= 50
@@ -689,7 +780,7 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                       ? Icons.celebration
                       : result.percentage >= 50
                       ? Icons.thumb_up
-                      : Icons.refresh,
+                      : Icons.sentiment_dissatisfied,
                   color: color,
                   size: 40,
                 ),
@@ -703,7 +794,28 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                   color: Color(0xFF1F2937),
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
+              // OCR confidence indicator
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    ocrResult.confidence >= 0.7
+                        ? Icons.verified
+                        : Icons.warning_amber,
+                    size: 14,
+                    color: ocrResult.confidence >= 0.7
+                        ? Colors.green
+                        : Colors.orange,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${(ocrResult.confidence * 100).toStringAsFixed(0)}% detection • ${ocrResult.provider}',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
               Text(
                 '${result.score}/${result.totalItems}',
                 style: TextStyle(
@@ -716,7 +828,25 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                 '${result.percentage.toStringAsFixed(0)}%',
                 style: TextStyle(fontSize: 18, color: Colors.grey[600]),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 8),
+              // Detected answers preview
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Detected: ${result.studentAnswers.join(", ")}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey[600],
+                    fontFamily: 'monospace',
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(height: 20),
               Row(
                 children: [
                   Expanded(
@@ -737,10 +867,26 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
-                      child: const Text('View Details'),
+                      child: const Text('Details'),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _showEditAnswersDialog(result);
+                      },
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      child: const Text('Edit'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: ElevatedButton(
                       onPressed: () => Navigator.pop(context),
@@ -752,13 +898,136 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
-                      child: const Text('Scan Next'),
+                      child: const Text('Next'),
                     ),
                   ),
                 ],
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  void _showEditAnswersDialog(ScanResult result) {
+    List<String> editedAnswers = List.from(result.studentAnswers);
+    final options = ['A', 'B', 'C', 'D', '-'];
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Row(
+            children: [
+              const Icon(Icons.edit, color: Color(0xFF2563EB)),
+              const SizedBox(width: 8),
+              const Text('Edit Answers'),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 400,
+            child: ListView.builder(
+              itemCount: result.totalItems,
+              itemBuilder: (context, index) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 30,
+                        child: Text(
+                          '${index + 1}.',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      ...options.map(
+                        (opt) => Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: ChoiceChip(
+                            label: Text(opt),
+                            selected: editedAnswers[index] == opt,
+                            selectedColor: const Color(0xFF2563EB),
+                            labelStyle: TextStyle(
+                              color: editedAnswers[index] == opt
+                                  ? Colors.white
+                                  : Colors.black,
+                              fontSize: 12,
+                            ),
+                            onSelected: (selected) {
+                              setDialogState(() {
+                                editedAnswers[index] = opt;
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(
+                        editedAnswers[index] == result.correctAnswers[index]
+                            ? Icons.check_circle
+                            : Icons.cancel,
+                        color:
+                            editedAnswers[index] == result.correctAnswers[index]
+                            ? Colors.green
+                            : Colors.red,
+                        size: 20,
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                // Update the result with edited answers
+                int newScore = 0;
+                for (int i = 0; i < result.totalItems; i++) {
+                  if (editedAnswers[i] == result.correctAnswers[i]) {
+                    newScore++;
+                  }
+                }
+
+                final updatedResult = ScanResult(
+                  id: result.id,
+                  studentName: result.studentName,
+                  score: newScore,
+                  totalItems: result.totalItems,
+                  studentAnswers: editedAnswers,
+                  correctAnswers: result.correctAnswers,
+                  scannedAt: result.scannedAt,
+                  answerKeyName: result.answerKeyName,
+                  imagePath: result.imagePath,
+                );
+
+                // Update in app state (you might need to implement update method)
+                // For now, remove old and add new
+                appState.scanResults.removeWhere((r) => r.id == result.id);
+                appState.addScanResult(updatedResult);
+
+                Navigator.pop(context);
+                ScaffoldMessenger.of(this.context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Updated: ${updatedResult.score}/${updatedResult.totalItems}',
+                    ),
+                    backgroundColor: const Color(0xFF10B981),
+                  ),
+                );
+              },
+              child: const Text('Save'),
+            ),
+          ],
         ),
       ),
     );
@@ -798,12 +1067,16 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
               ),
             ),
             const SizedBox(height: 16),
-            const Text('Tips:', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            const Text('• Ensure good lighting'),
-            const Text('• Hold the camera steady'),
-            const Text('• Make sure the answer sheet is flat'),
-            const Text('• Try cropping to just the answers area'),
+            const Text(
+              'Tips for better scanning:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            _buildTip(Icons.wb_sunny, 'Ensure good, even lighting'),
+            _buildTip(Icons.crop_free, 'Crop to show only answers'),
+            _buildTip(Icons.straighten, 'Keep the paper flat'),
+            _buildTip(Icons.pan_tool, 'Hold camera steady'),
+            _buildTip(Icons.cloud, 'Try cloud OCR for better accuracy'),
           ],
         ),
         actions: [
@@ -814,10 +1087,23 @@ class _ActiveScanScreenState extends State<ActiveScanScreen>
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              _captureAndProcess(); // Retry
+              _captureAndProcess();
             },
             child: const Text('Retry'),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTip(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: Colors.grey[600]),
+          const SizedBox(width: 8),
+          Text(text, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
         ],
       ),
     );

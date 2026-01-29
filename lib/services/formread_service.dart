@@ -1,222 +1,363 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:http/http.dart' as http;
-import 'package:path/path.dart' as path;
 
-class FormReadService {
-  // Replace with your actual FormRead API key
-  static const String _apiKey = 'YOUR_FORMREAD_API_KEY';
-  static const String _baseUrl = 'https://api.formread.com/v1';
+/// OCR Service using free providers
+class OCRService {
+  // OCR.space free API key (get yours at https://ocr.space/ocrapi/freekey)
+  static const String _ocrSpaceApiKey =
+      'K85947648788957'; // Free test key, replace with yours
 
-  // Alternative: Use environment variables
-  // static String get _apiKey => const String.fromEnvironment('FORMREAD_API_KEY');
-
-  /// Scan an answer sheet image and extract bubble answers
-  static Future<FormReadResult> scanAnswerSheet({
+  /// Primary method: On-device OCR using Google ML Kit (FREE, no internet needed)
+  static Future<OMRResult> scanWithMLKit({
     required File imageFile,
     required int totalQuestions,
-    int optionsPerQuestion = 4, // A, B, C, D
+    int optionsPerQuestion = 4,
   }) async {
+    final textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
+
     try {
-      // Create multipart request
-      var request = http.MultipartRequest(
-        'POST',
-        Uri.parse('$_baseUrl/omr/scan'),
+      final inputImage = InputImage.fromFile(imageFile);
+      final recognizedText = await textRecognizer.processImage(inputImage);
+
+      debugPrint('ML Kit recognized text:\n${recognizedText.text}');
+
+      // Parse the recognized text to extract answers
+      final answers = _parseAnswersFromText(
+        recognizedText.text,
+        totalQuestions,
+        optionsPerQuestion,
       );
 
-      // Add headers
-      request.headers.addAll({
-        'Authorization': 'Bearer $_apiKey',
-        'Accept': 'application/json',
-      });
+      // Try to extract student info
+      final studentInfo = _extractStudentInfo(recognizedText.text);
 
-      // Add form fields
-      request.fields['total_questions'] = totalQuestions.toString();
-      request.fields['options_per_question'] = optionsPerQuestion.toString();
-      request.fields['output_format'] = 'json';
-
-      // Add image file
-      request.files.add(
-        await http.MultipartFile.fromPath(
-          'image',
-          imageFile.path,
-          filename: path.basename(imageFile.path),
-        ),
+      return OMRResult(
+        success: true,
+        answers: answers,
+        studentName: studentInfo['name'],
+        studentId: studentInfo['id'],
+        confidence: _calculateConfidence(answers, totalQuestions),
+        rawText: recognizedText.text,
+        provider: 'Google ML Kit (Offline)',
       );
-
-      // Send request
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode == 200) {
-        final jsonData = json.decode(response.body);
-        return FormReadResult.fromJson(jsonData);
-      } else {
-        debugPrint('FormRead API Error: ${response.statusCode}');
-        debugPrint('Response: ${response.body}');
-        throw FormReadException(
-          'API Error: ${response.statusCode}',
-          response.body,
-        );
-      }
     } catch (e) {
-      debugPrint('FormRead Service Error: $e');
+      debugPrint('ML Kit Error: $e');
       rethrow;
+    } finally {
+      textRecognizer.close();
     }
   }
 
-  /// Alternative method using base64 encoded image
-  static Future<FormReadResult> scanAnswerSheetBase64({
-    required String base64Image,
+  /// Fallback method: OCR.space cloud API (FREE tier: 25,000 requests/month)
+  static Future<OMRResult> scanWithOCRSpace({
+    required File imageFile,
     required int totalQuestions,
     int optionsPerQuestion = 4,
   }) async {
     try {
+      final bytes = await imageFile.readAsBytes();
+      final base64Image = base64Encode(bytes);
+
       final response = await http.post(
-        Uri.parse('$_baseUrl/omr/scan'),
-        headers: {
-          'Authorization': 'Bearer $_apiKey',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
+        Uri.parse('https://api.ocr.space/parse/image'),
+        headers: {'apikey': _ocrSpaceApiKey},
+        body: {
+          'base64Image': 'data:image/jpeg;base64,$base64Image',
+          'language': 'eng',
+          'isOverlayRequired': 'false',
+          'detectOrientation': 'true',
+          'scale': 'true',
+          'OCREngine': '2', // Engine 2 is better for printed text
         },
-        body: json.encode({
-          'image': base64Image,
-          'total_questions': totalQuestions,
-          'options_per_question': optionsPerQuestion,
-          'output_format': 'json',
-        }),
       );
 
       if (response.statusCode == 200) {
         final jsonData = json.decode(response.body);
-        return FormReadResult.fromJson(jsonData);
-      } else {
-        throw FormReadException(
-          'API Error: ${response.statusCode}',
-          response.body,
-        );
+
+        if (jsonData['IsErroredOnProcessing'] == true) {
+          throw OCRException(
+            'OCR.space processing error',
+            jsonData['ErrorMessage']?.toString(),
+          );
+        }
+
+        final parsedResults = jsonData['ParsedResults'] as List?;
+        if (parsedResults != null && parsedResults.isNotEmpty) {
+          final text = parsedResults[0]['ParsedText'] as String? ?? '';
+
+          debugPrint('OCR.space recognized text:\n$text');
+
+          final answers = _parseAnswersFromText(
+            text,
+            totalQuestions,
+            optionsPerQuestion,
+          );
+          final studentInfo = _extractStudentInfo(text);
+
+          return OMRResult(
+            success: true,
+            answers: answers,
+            studentName: studentInfo['name'],
+            studentId: studentInfo['id'],
+            confidence: _calculateConfidence(answers, totalQuestions),
+            rawText: text,
+            provider: 'OCR.space (Cloud)',
+          );
+        }
       }
+
+      throw OCRException(
+        'OCR.space Error: ${response.statusCode}',
+        response.body,
+      );
     } catch (e) {
-      debugPrint('FormRead Service Error: $e');
+      debugPrint('OCR.space Error: $e');
       rethrow;
     }
   }
-}
 
-/// Result from FormRead API
-class FormReadResult {
-  final bool success;
-  final String? studentId;
-  final String? studentName;
-  final List<String> answers;
-  final double confidence;
-  final String? rawResponse;
-  final List<QuestionResult>? detailedResults;
+  /// Smart answer parsing from OCR text
+  static List<String> _parseAnswersFromText(
+    String text,
+    int totalQuestions,
+    int optionsPerQuestion,
+  ) {
+    List<String> answers = List.filled(totalQuestions, '-');
 
-  FormReadResult({
-    required this.success,
-    this.studentId,
-    this.studentName,
-    required this.answers,
-    required this.confidence,
-    this.rawResponse,
-    this.detailedResults,
-  });
+    // Clean and normalize text
+    final cleanText = text
+        .replaceAll('\r', '\n')
+        .replaceAll(RegExp(r'\n+'), '\n')
+        .trim();
 
-  factory FormReadResult.fromJson(Map<String, dynamic> json) {
-    // Parse answers from various possible response formats
-    List<String> parsedAnswers = [];
+    final lines = cleanText.split('\n');
 
-    if (json['answers'] != null) {
-      if (json['answers'] is List) {
-        parsedAnswers = (json['answers'] as List).map((e) {
-          if (e is Map) {
-            return (e['selected'] ?? e['answer'] ?? '-')
-                .toString()
-                .toUpperCase();
-          }
-          return e.toString().toUpperCase();
-        }).toList();
-      } else if (json['answers'] is Map) {
-        // Handle map format: {"1": "A", "2": "B", ...}
-        final answersMap = json['answers'] as Map;
-        final sortedKeys = answersMap.keys.toList()
-          ..sort(
-            (a, b) =>
-                int.parse(a.toString()).compareTo(int.parse(b.toString())),
-          );
-        parsedAnswers = sortedKeys
-            .map((k) => answersMap[k].toString().toUpperCase())
-            .toList();
-      }
-    }
+    // Multiple parsing strategies
 
-    // Parse detailed results if available
-    List<QuestionResult>? detailed;
-    if (json['detailed_results'] != null || json['questions'] != null) {
-      final detailList = json['detailed_results'] ?? json['questions'];
-      if (detailList is List) {
-        detailed = detailList.map((e) => QuestionResult.fromJson(e)).toList();
-      }
-    }
-
-    return FormReadResult(
-      success: json['success'] ?? json['status'] == 'success' ?? true,
-      studentId: json['student_id'] ?? json['studentId'] ?? json['id'],
-      studentName: json['student_name'] ?? json['studentName'] ?? json['name'],
-      answers: parsedAnswers,
-      confidence: (json['confidence'] ?? json['accuracy'] ?? 0.95).toDouble(),
-      rawResponse: json.toString(),
-      detailedResults: detailed,
+    // Strategy 1: Look for patterns like "1. A" or "1) A" or "1: A" or "1 A"
+    final pattern1 = RegExp(
+      r'(\d+)\s*[\.\)\:\-]?\s*([A-Ea-e])\b',
+      multiLine: true,
     );
+    for (final match in pattern1.allMatches(cleanText)) {
+      final questionNum = int.tryParse(match.group(1) ?? '');
+      final answer = match.group(2)?.toUpperCase();
+
+      if (questionNum != null &&
+          answer != null &&
+          questionNum >= 1 &&
+          questionNum <= totalQuestions) {
+        answers[questionNum - 1] = answer;
+      }
+    }
+
+    // Strategy 2: Look for circled/marked answers in format "①A ②B ③C"
+    final pattern2 = RegExp(
+      r'[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳㉑㉒㉓㉔㉕]\s*([A-Ea-e])',
+      multiLine: true,
+    );
+    int idx = 0;
+    for (final match in pattern2.allMatches(cleanText)) {
+      final answer = match.group(1)?.toUpperCase();
+      if (answer != null && idx < totalQuestions) {
+        answers[idx] = answer;
+        idx++;
+      }
+    }
+
+    // Strategy 3: Look for answer grid patterns
+    // Common formats: "A B C D" or "A|B|C|D" or "[A] [B] [C] [D]"
+    final pattern3 = RegExp(
+      r'\b([A-Ea-e])\s*[\|\[\]\(\)●○◯◉■□✓✗xX]?\s*',
+      multiLine: true,
+    );
+
+    // Strategy 4: Parse line by line for question-answer pairs
+    for (int i = 0; i < lines.length && i < totalQuestions; i++) {
+      final line = lines[i].trim();
+
+      // Check if line contains a single answer letter
+      final singleLetterMatch = RegExp(r'^([A-Ea-e])$').firstMatch(line);
+      if (singleLetterMatch != null && answers[i] == '-') {
+        answers[i] = singleLetterMatch.group(1)!.toUpperCase();
+        continue;
+      }
+
+      // Check for marked/selected answer patterns
+      // Patterns like: "[X]A [ ]B [ ]C [ ]D" or "●A ○B ○C ○D"
+      final markedPattern = RegExp(
+        r'[\[●◉■✓xX]\s*([A-Ea-e])|([A-Ea-e])\s*[\]●◉■✓xX]',
+      );
+      final markedMatch = markedPattern.firstMatch(line);
+      if (markedMatch != null && answers[i] == '-') {
+        answers[i] = (markedMatch.group(1) ?? markedMatch.group(2))!
+            .toUpperCase();
+      }
+    }
+
+    // Strategy 5: Look for answer key format "ABCD ABCD ABCD..."
+    final allLettersPattern = RegExp(r'^[A-Ea-e\s]+$');
+    for (final line in lines) {
+      if (allLettersPattern.hasMatch(line.trim())) {
+        final letterMatches = RegExp(r'[A-Ea-e]').allMatches(line);
+        int qNum = 0;
+        for (final match in letterMatches) {
+          if (qNum < totalQuestions && answers[qNum] == '-') {
+            answers[qNum] = match.group(0)!.toUpperCase();
+          }
+          qNum++;
+        }
+      }
+    }
+
+    debugPrint('Parsed answers: $answers');
+    return answers;
   }
-}
 
-/// Detailed result for each question
-class QuestionResult {
-  final int questionNumber;
-  final String selectedAnswer;
-  final double confidence;
-  final Map<String, double>? optionConfidences;
+  /// Extract student information from text
+  static Map<String, String?> _extractStudentInfo(String text) {
+    String? name;
+    String? id;
 
-  QuestionResult({
-    required this.questionNumber,
-    required this.selectedAnswer,
-    required this.confidence,
-    this.optionConfidences,
-  });
+    // Look for name patterns
+    final namePatterns = [
+      RegExp(
+        r'(?:name|student|nombre)\s*[:=]?\s*([A-Za-z\s]+)',
+        caseSensitive: false,
+      ),
+      RegExp(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)$', multiLine: true),
+    ];
 
-  factory QuestionResult.fromJson(Map<String, dynamic> json) {
-    Map<String, double>? optConf;
-    if (json['options'] != null || json['option_confidences'] != null) {
-      final opts = json['options'] ?? json['option_confidences'];
-      if (opts is Map) {
-        optConf = opts.map(
-          (k, v) => MapEntry(k.toString(), (v as num).toDouble()),
+    for (final pattern in namePatterns) {
+      final match = pattern.firstMatch(text);
+      if (match != null) {
+        name = match.group(1)?.trim();
+        if (name != null && name.length > 2) break;
+      }
+    }
+
+    // Look for ID patterns
+    final idPatterns = [
+      RegExp(
+        r'(?:id|student\s*id|number|no\.?)\s*[:=]?\s*(\d+)',
+        caseSensitive: false,
+      ),
+      RegExp(r'\b(\d{5,10})\b'), // 5-10 digit number
+    ];
+
+    for (final pattern in idPatterns) {
+      final match = pattern.firstMatch(text);
+      if (match != null) {
+        id = match.group(1);
+        break;
+      }
+    }
+
+    return {'name': name, 'id': id};
+  }
+
+  /// Calculate confidence based on how many answers were detected
+  static double _calculateConfidence(List<String> answers, int total) {
+    final detected = answers.where((a) => a != '-').length;
+    return detected / total;
+  }
+
+  /// Combined scan: Try ML Kit first, fallback to OCR.space
+  static Future<OMRResult> scan({
+    required File imageFile,
+    required int totalQuestions,
+    int optionsPerQuestion = 4,
+    bool preferCloud = false,
+  }) async {
+    if (preferCloud) {
+      try {
+        return await scanWithOCRSpace(
+          imageFile: imageFile,
+          totalQuestions: totalQuestions,
+          optionsPerQuestion: optionsPerQuestion,
+        );
+      } catch (e) {
+        debugPrint('Cloud OCR failed, falling back to on-device: $e');
+        return await scanWithMLKit(
+          imageFile: imageFile,
+          totalQuestions: totalQuestions,
+          optionsPerQuestion: optionsPerQuestion,
+        );
+      }
+    } else {
+      try {
+        final result = await scanWithMLKit(
+          imageFile: imageFile,
+          totalQuestions: totalQuestions,
+          optionsPerQuestion: optionsPerQuestion,
+        );
+
+        // If confidence is too low, try cloud
+        if (result.confidence < 0.5) {
+          debugPrint(
+            'Low confidence (${result.confidence}), trying cloud OCR...',
+          );
+          try {
+            return await scanWithOCRSpace(
+              imageFile: imageFile,
+              totalQuestions: totalQuestions,
+              optionsPerQuestion: optionsPerQuestion,
+            );
+          } catch (e) {
+            return result; // Return original if cloud fails
+          }
+        }
+
+        return result;
+      } catch (e) {
+        debugPrint('On-device OCR failed, trying cloud: $e');
+        return await scanWithOCRSpace(
+          imageFile: imageFile,
+          totalQuestions: totalQuestions,
+          optionsPerQuestion: optionsPerQuestion,
         );
       }
     }
-
-    return QuestionResult(
-      questionNumber: json['question'] ?? json['number'] ?? json['q'] ?? 0,
-      selectedAnswer: (json['selected'] ?? json['answer'] ?? '-')
-          .toString()
-          .toUpperCase(),
-      confidence: (json['confidence'] ?? json['score'] ?? 1.0).toDouble(),
-      optionConfidences: optConf,
-    );
   }
 }
 
-/// Custom exception for FormRead errors
-class FormReadException implements Exception {
+/// Result from OCR scanning
+class OMRResult {
+  final bool success;
+  final List<String> answers;
+  final String? studentName;
+  final String? studentId;
+  final double confidence;
+  final String? rawText;
+  final String provider;
+
+  OMRResult({
+    required this.success,
+    required this.answers,
+    this.studentName,
+    this.studentId,
+    required this.confidence,
+    this.rawText,
+    required this.provider,
+  });
+
+  @override
+  String toString() {
+    return 'OMRResult(success: $success, answers: $answers, confidence: $confidence, provider: $provider)';
+  }
+}
+
+/// Custom exception for OCR errors
+class OCRException implements Exception {
   final String message;
   final String? details;
 
-  FormReadException(this.message, [this.details]);
+  OCRException(this.message, [this.details]);
 
   @override
   String toString() =>
-      'FormReadException: $message${details != null ? '\nDetails: $details' : ''}';
+      'OCRException: $message${details != null ? '\nDetails: $details' : ''}';
 }
